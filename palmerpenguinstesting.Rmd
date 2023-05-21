@@ -1,0 +1,186 @@
+
+```{r}
+library(tidyverse)
+library(tidyr)
+library(palmerpenguins)
+library(ggthemes)
+library(leaps)
+library(caret)
+```
+```{r}
+
+penguins <- penguins %>% drop_na()
+glimpse(penguins)
+
+```
+```{r}
+penguinScat <- function(d){
+	p <- ggplot(
+		data = d,
+		mapping = aes(x = bill_depth_mm, y = bill_length_mm, fill = species)
+		) +
+		geom_point(mapping = aes(color = species, shape = species), na.rm = TRUE) +
+		geom_smooth(method = "lm", mapping = aes(color = species), na.rm = TRUE) +
+		theme(text=element_text(size = 20))
+	p
+}
+
+sct <- penguinScat(penguins)
+sct
+```
+```{r}
+penguinScat2 <- function(d){
+	p <- ggplot(
+		data = d,
+		mapping = aes(x = bill_depth_mm, y = bill_length_mm)
+		) +
+		geom_point() +
+		geom_smooth(method = "lm") +
+		facet_wrap(~species) +
+		theme(text = element_text(size = 20))
+	p
+}
+
+sct2 <- penguinScat2(penguins)
+sct2
+```
+```{r}
+penguinScat3 <- function(d){ # Bad... reduces dimensionality beyond coherence
+	p <- ggplot(
+		data = d,
+		mapping = aes(x = species, y = bill_length_mm, fill = species)
+		) +
+		geom_point(mapping = aes(color = species, shape = species)) +
+		geom_smooth(method = "lm", mapping = aes(color = species)) +
+		theme(text = element_text(size = 20))
+	p
+}
+
+sct3 <- penguinScat3(penguins)
+sct3
+```
+```{r}
+penguinIVP_box <- function(d){
+	p <- ggplot(data = d, mapping = aes(x = species, y = body_mass_g, fill = species)) +
+		geom_boxplot() +
+		geom_jitter(color = "black", fill = "white", size = 1, alpha = 0.5) +
+		theme(text = element_text(size = 20))
+	p
+}
+ivpb <- penguinIVP_box(penguins)
+ivpb
+```
+```{r}
+penguinIVP_violin <- function(d){ #Good! shows scatter better than box plots
+	p <- ggplot(data = d, mapping = aes(x = species, y = body_mass_g, fill = species)) +
+		geom_violin() +
+		geom_jitter(color="black", fill = "white", size = 1, alpha = 0.5) +
+		theme(text=element_text(size = 20))
+	p
+}
+
+ivpv <- penguinIVP_violin(penguins)
+ivpv
+```
+```{r}
+penguinHist <- function(d){
+	p <- ggplot(
+		data = d,
+		mapping = aes(x = flipper_length_mm, fill = species)
+		) +	geom_histogram(binwidth = 4, color = "black", na.rm = TRUE)
+		species_means <- tapply(penguins$flipper_length_mm, penguins$species, mean, na.rm = TRUE)
+	p + geom_vline(xintercept = species_means, linetype = "dashed", linewidth = 1)
+}
+
+hst <- penguinHist(penguins)
+hst
+```
+```{r}
+penguinScatNonLinear3Dims <- function(d){
+	p <- ggplot(data = d, mapping=aes(x = flipper_length_mm, y = body_mass_g)) +
+		geom_point(na.rm = TRUE, aes(color = bill_depth_mm)) +
+		theme(text=element_text(size = 20)) +
+		geom_smooth(se = FALSE)
+	p
+}
+
+bsct <- penguinScatNonLinear3Dims(penguins)
+bsct
+```
+```{r}
+testr <- function(d){
+	p <- penguins |>
+			ggplot(
+			mapping = aes(x = flipper_length_mm, y = body_mass_g)
+			) +
+			geom_point() +
+			geom_smooth()
+	p
+}
+
+tstr <- testr(penguins)
+tstr
+```
+```{r}
+linModel <- function(d) {
+	model <- lm (body_mass_g ~ flipper_length_mm + bill_depth_mm + bill_length_mm + species + sex + year, data = d)
+	r.sum <- summary(model)
+	print(r.sum)
+}
+
+linModel(penguins)
+```
+```{r}
+bestSubsets <- function(d) {
+	## This function is opaque but prints out the number of variables
+	## to select by three metrics. Pick the astrisked dimensions.
+	models <- regsubsets(body_mass_g ~., data = d)
+	res.sum <- summary(models)
+
+	# id: model id
+	# object: regsubsets object
+	# data: data used to fit regsubsets
+	# outcome: outcome variable
+
+	print(res.sum)
+	df <- data.frame(
+		Adj.R2 = which.max(res.sum$adjr2),
+		CP = which.min(res.sum$cp),
+		BIC = which.min(res.sum$bic))
+	df
+}
+
+bestSubsets(penguins)
+```
+
+```{r}
+
+get_model_formula <- function(id, object, outcome){
+	models <- summary(object)$which[id, -1]
+	predictors <- names(which(models == TRUE))
+	predictors <- paste(predictors, collapse = "+")
+	as.formula(paste0(outcome, "~", predictors))
+}
+
+get_cv_error <- function(model.formula, data){
+	set.seed(1)
+	train.control <- trainControl(method = "cv", number = 8)
+	cv <- train(model.formula, data = data, method = "lm", trControl = train.control)
+	cv$results$RMSE
+}
+
+models <- regsubsets(body_mass_g ~., data = penguins)
+
+penguins$speciesGentoo <- ifelse(penguins$species == "Gentoo", 1, 0)
+penguins$speciesChinstrap <- ifelse(penguins$species == "Chinstrap", 1, 0)
+penguins$sexmale <- ifelse(penguins$sex == "male", 1, 0)
+
+get_model_formula(6, models, "body_mass_g")
+
+# Compute cross-validation error
+model.ids <- 1:8
+cv.errors <- map(model.ids, get_model_formula, models, "body_mass_g") %>%
+  map(get_cv_error, data = penguins) %>%
+  unlist()
+cv.errors
+```
